@@ -402,6 +402,14 @@ const router = createBrowserRouter([
           return { element: <PrivateRoute Component={ChemicalExtractionPage} /> };
         },
       },
+      // 提示词管理页面
+      {
+        path: "/chemical/prompts",
+        lazy: async () => {
+          const { default: PromptTemplateManager } = await import("@/pages/Chemical/PromptTemplateManager");
+          return { element: <PrivateRoute Component={PromptTemplateManager} /> };
+        },
+      },
       // Catch-all route for 404s
       {
         path: "*",
