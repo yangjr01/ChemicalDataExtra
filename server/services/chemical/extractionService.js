@@ -98,13 +98,15 @@ const ExtractionService = {
    */
   async callLLM(prompt, options = {}) {
     try {
-      const { GenericOpenAiLLM } = require("../../utils/AiProviders/genericOpenAi/index");
-
       const provider = process.env.LLM_PROVIDER;
       let client;
 
-      if (provider === "generic-openai") {
-        // 使用通义千问 API
+      // 根据 LLM 提供商选择客户端
+      if (provider === "deepseek") {
+        const { DeepSeekLLM } = require("../../utils/AiProviders/deepseek/index");
+        client = new DeepSeekLLM();
+      } else if (provider === "generic-openai") {
+        const { GenericOpenAiLLM } = require("../../utils/AiProviders/genericOpenAi/index");
         client = new GenericOpenAiLLM();
       } else {
         // 默认使用 OpenAI
