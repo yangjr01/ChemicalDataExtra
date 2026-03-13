@@ -132,12 +132,26 @@ const Article = {
    */
   async update(id, data) {
     const updateData = { ...data, lastUpdatedAt: new Date() };
+    
+    // 处理 keywords：如果是数组，转换为 JSON 字符串
     if (data.keywords) {
-      updateData.keywords = JSON.stringify(data.keywords);
+      if (Array.isArray(data.keywords)) {
+        updateData.keywords = JSON.stringify(data.keywords);
+      } else if (typeof data.keywords === 'string') {
+        // 如果已经是字符串，保持不变
+        updateData.keywords = data.keywords;
+      }
     }
+    
+    // 处理 publicationDate：确保是 Date 对象
     if (data.publicationDate) {
-      updateData.publicationDate = new Date(data.publicationDate);
+      if (!(data.publicationDate instanceof Date)) {
+        updateData.publicationDate = new Date(data.publicationDate);
+      }
     }
+
+    console.log(`[Article.update] id=${id}, updateData:`, JSON.stringify(updateData, (key, value) =>
+      typeof value === 'bigint' ? value.toString() : value, 2));
 
     return await prisma.chemical_articles.update({
       where: { id },
@@ -210,6 +224,16 @@ const Author = {
       },
     });
   },
+};
+
+/**
+ * 文献管理模型 - 提取任务相关方法
+ */
+Article.getExtractionTasks = async function(articleId) {
+  return await prisma.chemical_extraction_tasks.findMany({
+    where: { articleId },
+    orderBy: { createdAt: 'desc' },
+  });
 };
 
 module.exports = {

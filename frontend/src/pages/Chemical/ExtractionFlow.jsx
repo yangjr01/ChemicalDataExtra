@@ -8,10 +8,6 @@ import {
   Button,
   Grid,
   Chip,
-  Stepper,
-  Step,
-  StepLabel,
-  StepContent,
   TextField,
   Select,
   MenuItem,
@@ -28,6 +24,10 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  LinearProgress,
+  Step,
+  StepLabel,
+  Stepper,
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -35,6 +35,7 @@ import {
   Save as SaveIcon,
   Refresh as RefreshIcon,
   Storage as StorageIcon,
+  CheckCircle as CheckCircleIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { baseHeaders } from '../../utils/request';
@@ -150,13 +151,9 @@ const ExtractionFlow = () => {
       if (data.success) {
         // 如果是缓存结果，直接显示
         if (data.cached) {
-          setCurrentTask(data.data);
-          setChatHistory([
-            {
-              role: 'system',
-              content: `使用缓存的提取结果（${EXTRACTION_STEPS[activeStep].name}）`,
-            },
-          ]);
+          // 不设置 currentTask，直接显示结果
+          setCurrentTask(null);
+          setChatHistory([]);
           // 解析并显示缓存结果
           try {
             const parsedData = data.data.parsedData
@@ -167,6 +164,13 @@ const ExtractionFlow = () => {
                 ...prev,
                 [activeStep]: parsedData,
               }));
+              setChatHistory([
+                {
+                  role: 'system',
+                  content: `✅ 数据已成功保存到数据库！`,
+                },
+              ]);
+              setSavedToDB(true);
             }
           } catch (e) {
             console.log('解析缓存结果失败:', e);
@@ -397,7 +401,7 @@ const ExtractionFlow = () => {
         </Typography>
         {article && (
           <Typography variant="body2" color="text.secondary">
-            文献: {article.title}
+            文献：{article.title}
           </Typography>
         )}
       </Box>
@@ -412,80 +416,60 @@ const ExtractionFlow = () => {
       {/* 提取步骤 */}
       {!loading && (
         <Grid container spacing={3}>
-          {/* 左侧：步骤列表 */}
-          <Grid item xs={12} md={4}>
+          {/* 顶部：进度条 */}
+          <Grid item xs={12}>
             <Card>
               <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  提取步骤
-                </Typography>
-                <Stepper activeStep={activeStep} orientation="vertical">
+                <Box sx={{ mb: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                    <Typography variant="h6">提取进度</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {activeStep} / {EXTRACTION_STEPS.length}
+                    </Typography>
+                  </Box>
+                  <LinearProgress 
+                    variant="determinate" 
+                    value={(activeStep / EXTRACTION_STEPS.length) * 100}
+                    sx={{ height: 10, borderRadius: 5 }}
+                  />
+                </Box>
+                
+                {/* 步骤标签 */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
                   {EXTRACTION_STEPS.map((step, index) => (
-                    <Step key={step.id}>
-                      <StepLabel
-                        optional={
-                          results[index] && (
-                            <Chip label="已完成" color="success" size="small" />
-                          )
-                        }
+                    <Box
+                      key={step.id}
+                      sx={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        flex: 1,
+                        position: 'relative',
+                      }}
+                    >
+                      <CheckCircleIcon
+                        color={index < activeStep ? 'success' : index === activeStep ? 'primary' : 'disabled'}
+                        sx={{ fontSize: index === activeStep ? 40 : 30 }}
+                      />
+                      <Typography
+                        variant="caption"
+                        color={index === activeStep ? 'primary' : index < activeStep ? 'success.main' : 'text.secondary'}
+                        sx={{ mt: 0.5, textAlign: 'center', maxWidth: 80 }}
                       >
                         {step.name}
-                      </StepLabel>
-                      <StepContent>
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                          {step.description}
-                        </Typography>
-                        <Box sx={{ mb: 2 }}>
-                          {results[index] ? (
-                            // 已完成，显示重新提取按钮
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              startIcon={<RefreshIcon />}
-                              onClick={() => startExtraction(step.id, true)}
-                              disabled={extracting}
-                            >
-                              重新提取
-                            </Button>
-                          ) : (
-                            // 未开始，显示开始提取按钮
-                            <Button
-                              variant="contained"
-                              size="small"
-                              startIcon={<PlayIcon />}
-                              onClick={() => startExtraction(step.id)}
-                              disabled={extracting}
-                            >
-                              开始提取
-                            </Button>
-                          )}
-                          <Button size="small" onClick={skipStep} sx={{ ml: 1 }}>
-                            跳过
-                          </Button>
-                        </Box>
-                      </StepContent>
-                    </Step>
+                      </Typography>
+                      {index < activeStep && (
+                        <Chip label="完成" size="small" color="success" sx={{ mt: 0.5 }} />
+                      )}
+                    </Box>
                   ))}
-                </Stepper>
-
-                {activeStep === EXTRACTION_STEPS.length && (
-                  <Alert severity="success" sx={{ mt: 2 }}>
-                    所有提取步骤已完成！
-                    <Button
-                      size="small"
-                      onClick={() => navigate(`/chemical/data/${articleId}`)}
-                      sx={{ ml: 1 }}
-                    >
-                      查看数据
-                    </Button>
-                  </Alert>
-                )}
+                </Box>
               </CardContent>
             </Card>
           </Grid>
 
-          {/* 右侧：交互区域 */}
-          <Grid item xs={12} md={8}>
+          {/* 交互区域 */}
+          <Grid item xs={12}>
             {/* 提取状态指示器 */}
             {extracting && (
               <Card sx={{ mb: 3 }}>
@@ -527,7 +511,9 @@ const ExtractionFlow = () => {
                         size="small"
                         variant="outlined"
                         startIcon={<RefreshIcon />}
-                        onClick={() => startExtraction(EXTRACTION_STEPS[activeStep].id, true)}
+                        onClick={() => {
+                          startExtraction(EXTRACTION_STEPS[activeStep].id, true);
+                        }}
                         disabled={extracting}
                       >
                         重新提取
@@ -542,6 +528,18 @@ const ExtractionFlow = () => {
                       >
                         编辑
                       </Button>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="success"
+                        onClick={() => {
+                          setActiveStep((prev) => prev + 1);
+                          setCurrentTask(null);
+                          setSavedToDB(false);
+                        }}
+                      >
+                        下一步
+                      </Button>
                     </Box>
                   </Box>
                   <Paper variant="outlined" sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
@@ -553,78 +551,58 @@ const ExtractionFlow = () => {
               </Card>
             )}
 
-            {/* 提取过程/对话历史 */}
-            {chatHistory.length > 0 && (
-              <Card>
+            {/* 聊天交互区域 - 只在提取进行时显示 */}
+            {currentTask && !results[activeStep] && (
+              <Card sx={{ mb: 3 }}>
                 <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="h6">
-                      {extracting ? '提取过程' : '对话记录'}
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="h6">提取会话</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      任务 ID: {currentTask.id} | 状态：{currentTask.status}
                     </Typography>
-                    {currentTask && !savedToDB && results[activeStep] && (
-                      <Button
-                        size="small"
-                        variant="contained"
-                        startIcon={<StorageIcon />}
-                        onClick={saveToDatabase}
-                        disabled={savingToDB}
-                      >
-                        {savingToDB ? '保存中...' : '保存到数据库'}
-                      </Button>
+                  </Box>
+                  <Paper
+                    variant="outlined"
+                    sx={{
+                      p: 2,
+                      mb: 2,
+                      maxHeight: 400,
+                      overflow: 'auto',
+                      bgcolor: 'grey.50',
+                    }}
+                  >
+                    {chatHistory.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        正在等待响应...
+                      </Typography>
+                    ) : (
+                      chatHistory.map((msg, idx) => (
+                        <Box
+                          key={idx}
+                          sx={{
+                            mb: 1,
+                            p: 1,
+                            borderRadius: 1,
+                            bgcolor:
+                              msg.role === 'user' ? 'primary.light' : msg.role === 'system' ? 'warning.light' : 'grey.200',
+                          }}
+                        >
+                          <Typography variant="caption" color="text.secondary">
+                            {msg.role === 'user' ? '用户' : msg.role === 'system' ? '系统' : 'AI'}
+                          </Typography>
+                          <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap', m: 0 }}>
+                            {msg.content}
+                          </Typography>
+                        </Box>
+                      ))
                     )}
-                  </Box>
-                  <Box sx={{ maxHeight: 500, overflow: 'auto', mb: 2 }}>
-                    {chatHistory.map((msg, index) => (
-                      <Paper
-                        key={index}
-                        variant="outlined"
-                        sx={{
-                          p: 2,
-                          mb: 1,
-                          bgcolor:
-                            msg.role === 'system'
-                              ? 'info.light'
-                              : msg.role === 'user'
-                              ? 'action.hover'
-                              : 'background.default',
-                        }}
-                      >
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{
-                            display: 'block',
-                            mb: 0.5,
-                            fontWeight: msg.role === 'system' ? 'bold' : 'normal',
-                          }}
-                        >
-                          {msg.role === 'system'
-                            ? '系统'
-                            : msg.role === 'user'
-                            ? '用户'
-                            : '助手'}
-                        </Typography>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            whiteSpace: 'pre-wrap',
-                            fontFamily: msg.role === 'system' ? 'monospace' : 'inherit',
-                            fontSize: msg.role === 'system' ? '0.85rem' : 'inherit',
-                          }}
-                        >
-                          {msg.content}
-                        </Typography>
-                      </Paper>
-                    ))}
-                  </Box>
-
-                  {/* 输入框 - 仅在提取完成后显示 */}
-                  {!extracting && currentTask && (
+                  </Paper>
+                  {!['completed', 'failed'].includes(currentTask?.status) && (
                     <Box sx={{ display: 'flex', gap: 1 }}>
                       <TextField
                         fullWidth
                         size="small"
-                        placeholder="输入消息..."
+                        placeholder="输入额外指令..."
                         value={chatInput}
                         onChange={(e) => setChatInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
@@ -638,13 +616,23 @@ const ExtractionFlow = () => {
               </Card>
             )}
 
-            {/* 自定义提示词 */}
-            {!currentTask && !results[activeStep] && (
+            {/* 自定义提示词选择 - 始终显示 */}
+            {!currentTask && !results[activeStep] && activeStep < EXTRACTION_STEPS.length && (
               <Card>
                 <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    自定义提取
-                  </Typography>
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="h6" gutterBottom>
+                      {EXTRACTION_STEPS[activeStep].name}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {EXTRACTION_STEPS[activeStep].description}
+                    </Typography>
+                  </Box>
+                  
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    请选择提示词模板或输入自定义提示词开始提取
+                  </Alert>
+                  
                   <FormControl fullWidth sx={{ mb: 2 }}>
                     <InputLabel>选择提示词模板</InputLabel>
                     <Select
@@ -652,7 +640,7 @@ const ExtractionFlow = () => {
                       label="选择提示词模板"
                       onChange={(e) => setSelectedPrompt(e.target.value)}
                     >
-                      <MenuItem value="">使用默认</MenuItem>
+                      <MenuItem value="">使用默认提示词</MenuItem>
                       {prompts.map((p) => (
                         <MenuItem key={p.id} value={p.id}>
                           {p.title}
@@ -660,23 +648,68 @@ const ExtractionFlow = () => {
                       ))}
                     </Select>
                   </FormControl>
+                  
                   <TextField
                     fullWidth
                     multiline
                     rows={4}
-                    label="自定义提示词（可选）"
+                    label="自定义提示词（可选，留空使用模板）"
                     value={customPrompt}
                     onChange={(e) => setCustomPrompt(e.target.value)}
                     sx={{ mb: 2 }}
                   />
+                  
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button
+                      variant="contained"
+                      size="large"
+                      startIcon={<PlayIcon />}
+                      onClick={() =>
+                        startExtraction(selectedPrompt || EXTRACTION_STEPS[activeStep].id)
+                      }
+                      disabled={extracting}
+                    >
+                      开始提取
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="large"
+                      onClick={skipStep}
+                      disabled={extracting}
+                    >
+                      跳过此步骤
+                    </Button>
+                  </Box>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* 所有步骤完成 */}
+            {activeStep === EXTRACTION_STEPS.length && (
+              <Card>
+                <CardContent>
+                  <Alert severity="success" sx={{ mb: 2 }}>
+                    <Typography variant="h6" gutterBottom>
+                      🎉 所有提取步骤已完成！
+                    </Typography>
+                    <Typography variant="body2">
+                      所有 5 个模块的提取都已完成，您可以查看提取的数据或保存结果。
+                    </Typography>
+                  </Alert>
                   <Button
                     variant="contained"
-                    startIcon={<PlayIcon />}
-                    onClick={() =>
-                      startExtraction(selectedPrompt || EXTRACTION_STEPS[activeStep].id)
-                    }
+                    size="large"
+                    onClick={() => navigate(`/chemical/data/${articleId}`)}
                   >
-                    开始提取
+                    查看提取的数据
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="large"
+                    onClick={() => setActiveStep(0)}
+                    sx={{ ml: 1 }}
+                  >
+                    重新开始
                   </Button>
                 </CardContent>
               </Card>
@@ -717,7 +750,7 @@ const ExtractionFlow = () => {
               setEditDialog(false);
             }}
           >
-            保存
+            保存并进入下一步
           </Button>
         </DialogActions>
       </Dialog>

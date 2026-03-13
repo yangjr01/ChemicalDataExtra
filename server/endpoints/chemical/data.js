@@ -452,4 +452,84 @@ router.get("/techniques/list", async (req, res) => {
   }
 });
 
+/**
+ * @route GET /api/chemical/data/:articleId/pre-extractions
+ * @desc 获取文献的预提取结果（5 个模块的预提取文本）
+ */
+router.get("/:articleId/pre-extractions", async (req, res) => {
+  try {
+    const { articleId } = req.params;
+    const article = await Article.getById(parseInt(articleId));
+
+    if (!article) {
+      return res.status(404).json({ error: "文献不存在" });
+    }
+
+    // 获取该文献的所有提取任务
+    const extractionTasks = await Article.getExtractionTasks(parseInt(articleId));
+    
+    // 定义 5 个预提取模块
+    const preExtractionModules = [
+      {
+        id: 1,
+        name: "pre_extraction_materials_processes",
+        title: "预提取 - 材料工艺信息",
+        templateFile: "pre_extraction_materials_processes.txt",
+        result: null,
+      },
+      {
+        id: 2,
+        name: "materials_table",
+        title: "材料表",
+        templateFile: "materials_table.txt",
+        result: null,
+      },
+      {
+        id: 3,
+        name: "processes_table",
+        title: "工艺表",
+        templateFile: "processes_table.txt",
+        result: null,
+      },
+      {
+        id: 4,
+        name: "pre_extraction_characterizations",
+        title: "预提取 - 表征信息",
+        templateFile: "pre_extraction_characterizations.txt",
+        result: null,
+      },
+      {
+        id: 5,
+        name: "characterizations_table",
+        title: "表征信息表",
+        templateFile: "characterizations_table.txt",
+        result: null,
+      },
+    ];
+
+    // 从提取任务中查找对应的结果
+    if (extractionTasks && extractionTasks.length > 0) {
+      extractionTasks.forEach(task => {
+        const moduleIndex = preExtractionModules.findIndex(
+          m => m.name === task.promptName
+        );
+        if (moduleIndex !== -1 && task.rawResponse) {
+          preExtractionModules[moduleIndex].result = task.rawResponse;
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        articleId: parseInt(articleId),
+        modules: preExtractionModules,
+      },
+    });
+  } catch (error) {
+    console.error("获取预提取结果失败:", error);
+    res.status(500).json({ error: error.message || "获取失败" });
+  }
+});
+
 module.exports = router;

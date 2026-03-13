@@ -27,6 +27,8 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Alert,
+  Divider,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -34,6 +36,7 @@ import {
   Delete as DeleteIcon,
   Download as DownloadIcon,
   ExpandMore as ExpandMoreIcon,
+  AutoFixHigh as AutoFixIcon,
 } from '@mui/icons-material';
 import { useParams } from 'react-router-dom';
 import { baseHeaders } from '../../utils/request';
@@ -53,6 +56,10 @@ const DataViewer = () => {
   const [editData, setEditData] = useState({});
   const [addDialog, setAddDialog] = useState(false);
   const [newItem, setNewItem] = useState({});
+  const [preExtractions, setPreExtractions] = useState([]);
+  const [showPreExtractions, setShowPreExtractions] = useState(false);
+  const [materialsPreExtraction, setMaterialsPreExtraction] = useState(null);
+  const [characterizationsPreExtraction, setCharacterizationsPreExtraction] = useState(null);
 
   // 获取数据
   const fetchData = async () => {
@@ -75,8 +82,36 @@ const DataViewer = () => {
     }
   };
 
+  // 获取预提取结果
+  const fetchPreExtractions = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/data/${articleId}/pre-extractions`, {
+        headers: baseHeaders(),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setPreExtractions(data.data.modules);
+        // 提取 5 个模块的结果
+        const materialsPreExt = data.data.modules.find(
+          m => m.name === 'pre_extraction_materials_processes'
+        );
+        const charPreExt = data.data.modules.find(
+          m => m.name === 'pre_extraction_characterizations'
+        );
+        setMaterialsPreExtraction(materialsPreExt?.result || null);
+        setCharacterizationsPreExtraction(charPreExt?.result || null);
+        // 如果有任何预提取结果，自动显示
+        const hasResults = data.data.modules.some(m => m.result !== null);
+        setShowPreExtractions(hasResults);
+      }
+    } catch (error) {
+      console.error('获取预提取结果失败:', error);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+    fetchPreExtractions();
   }, [articleId]);
 
   // 导出数据
@@ -164,6 +199,77 @@ const DataViewer = () => {
         </Button>
       </Box>
 
+      {/* 预提取结果显示 */}
+      {preExtractions.length > 0 && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <AutoFixIcon color="primary" />
+                <Typography variant="h6">预提取结果（5 个模块）</Typography>
+              </Box>
+              <Button
+                size="small"
+                onClick={() => setShowPreExtractions(!showPreExtractions)}
+              >
+                {showPreExtractions ? '收起' : '展开'}
+              </Button>
+            </Box>
+
+            {showPreExtractions && (
+              <Grid container spacing={2}>
+                {preExtractions.map((module, index) => (
+                  <Grid item xs={12} key={module.id}>
+                    <Accordion defaultExpanded={false}>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Chip
+                          label={`${index + 1}. ${module.title}`}
+                          color={module.result ? 'success' : 'default'}
+                          size="small"
+                          sx={{ mr: 1 }}
+                        />
+                        <Typography variant="body2" color="text.secondary">
+                          {module.result ? '已提取' : '未提取'}
+                        </Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        {module.result ? (
+                          <Box
+                            sx={{
+                              p: 2,
+                              bgcolor: 'grey.50',
+                              borderRadius: 1,
+                              maxHeight: 400,
+                              overflow: 'auto',
+                            }}
+                          >
+                            <pre
+                              style={{
+                                whiteSpace: 'pre-wrap',
+                                wordWrap: 'break-word',
+                                margin: 0,
+                                fontFamily: 'monospace',
+                                fontSize: '0.875rem',
+                              }}
+                            >
+                              {module.result}
+                            </pre>
+                          </Box>
+                        ) : (
+                          <Alert severity="info">
+                            该模块尚未进行预提取，请在提取流程中选择对应的提示词模板进行提取。
+                          </Alert>
+                        )}
+                      </AccordionDetails>
+                    </Accordion>
+                  </Grid>
+                ))}
+              </Grid>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* 统计卡片 */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} md={4}>
@@ -209,6 +315,43 @@ const DataViewer = () => {
         {/* 材料列表 */}
         {activeTab === 0 && (
           <Box sx={{ p: 2 }}>
+            {/* 预提取 - 材料工艺信息 */}
+            {materialsPreExtraction && (
+              <Card sx={{ mb: 3, bgcolor: 'blue.50' }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <AutoFixIcon color="primary" sx={{ mr: 1 }} />
+                    <Typography variant="h6">预提取 - 材料工艺信息</Typography>
+                    <Chip label="AI 预提取" color="primary" size="small" sx={{ ml: 1 }} />
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    以下是 AI 从文献中预提取的材料和工艺信息（原始文本）：
+                  </Typography>
+                  <Box
+                    sx={{
+                      p: 2,
+                      bgcolor: 'grey.100',
+                      borderRadius: 1,
+                      maxHeight: 500,
+                      overflow: 'auto',
+                      fontFamily: 'monospace',
+                      fontSize: '0.875rem',
+                    }}
+                  >
+                    <pre
+                      style={{
+                        whiteSpace: 'pre-wrap',
+                        wordWrap: 'break-word',
+                        margin: 0,
+                      }}
+                    >
+                      {materialsPreExtraction}
+                    </pre>
+                  </Box>
+                </CardContent>
+              </Card>
+            )}
+            
             <Box sx={{ mb: 2, textAlign: 'right' }}>
               <Button
                 variant="contained"
@@ -282,6 +425,43 @@ const DataViewer = () => {
         {/* 工艺列表 */}
         {activeTab === 1 && (
           <Box sx={{ p: 2 }}>
+            {/* 预提取 - 材料工艺信息（工艺部分） */}
+            {materialsPreExtraction && (
+              <Card sx={{ mb: 3, bgcolor: 'blue.50' }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <AutoFixIcon color="primary" sx={{ mr: 1 }} />
+                    <Typography variant="h6">预提取 - 材料工艺信息</Typography>
+                    <Chip label="AI 预提取" color="primary" size="small" sx={{ ml: 1 }} />
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    以下是 AI 从文献中预提取的工艺信息（原始文本）：
+                  </Typography>
+                  <Box
+                    sx={{
+                      p: 2,
+                      bgcolor: 'grey.100',
+                      borderRadius: 1,
+                      maxHeight: 500,
+                      overflow: 'auto',
+                      fontFamily: 'monospace',
+                      fontSize: '0.875rem',
+                    }}
+                  >
+                    <pre
+                      style={{
+                        whiteSpace: 'pre-wrap',
+                        wordWrap: 'break-word',
+                        margin: 0,
+                      }}
+                    >
+                      {materialsPreExtraction}
+                    </pre>
+                  </Box>
+                </CardContent>
+              </Card>
+            )}
+            
             <Box sx={{ mb: 2, textAlign: 'right' }}>
               <Button
                 variant="contained"
@@ -367,6 +547,43 @@ const DataViewer = () => {
         {/* 表征列表 */}
         {activeTab === 2 && (
           <Box sx={{ p: 2 }}>
+            {/* 预提取 - 表征信息 */}
+            {characterizationsPreExtraction && (
+              <Card sx={{ mb: 3, bgcolor: 'blue.50' }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <AutoFixIcon color="primary" sx={{ mr: 1 }} />
+                    <Typography variant="h6">预提取 - 表征信息</Typography>
+                    <Chip label="AI 预提取" color="primary" size="small" sx={{ ml: 1 }} />
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    以下是 AI 从文献中预提取的表征信息（原始文本）：
+                  </Typography>
+                  <Box
+                    sx={{
+                      p: 2,
+                      bgcolor: 'grey.100',
+                      borderRadius: 1,
+                      maxHeight: 500,
+                      overflow: 'auto',
+                      fontFamily: 'monospace',
+                      fontSize: '0.875rem',
+                    }}
+                  >
+                    <pre
+                      style={{
+                        whiteSpace: 'pre-wrap',
+                        wordWrap: 'break-word',
+                        margin: 0,
+                      }}
+                    >
+                      {characterizationsPreExtraction}
+                    </pre>
+                  </Box>
+                </CardContent>
+              </Card>
+            )}
+            
             <Box sx={{ mb: 2, textAlign: 'right' }}>
               <Button
                 variant="contained"

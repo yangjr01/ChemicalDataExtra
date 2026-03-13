@@ -75,11 +75,11 @@ const TextExtractionPanel = () => {
 
   // 提示词列表
   const [prompts, setPrompts] = useState([]);
-  const [selectedPrompt, setSelectedPrompt] = useState('');
+  const [stepPrompts, setStepPrompts] = useState({});
 
   // 提取状态
   const [extracting, setExtracting] = useState(false);
-  const [currentTask, setCurrentTask] = useState(null);
+  const [stepTasks, setStepTasks] = useState({});
   const [chatHistory, setChatHistory] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [savingToDB, setSavingToDB] = useState(false);
@@ -109,8 +109,14 @@ const TextExtractionPanel = () => {
     }
   };
 
-  // 开始提取
+  const currentTask = stepTasks[currentStepIndex] || null;
+  const selectedPrompt = stepPrompts[currentStepIndex] || '';
+  const currentStepResult = extractionResults[currentStepIndex];
+  const shouldShowCustomExtraction = !extracting && !currentStepResult;
+
   const startExtraction = async (promptId, force = false) => {
+    const stepIndex = currentStepIndex;
+    const step = EXTRACTION_STEPS[stepIndex];
     setExtracting(true);
     setChatHistory([]);
     setSavingToDB(false);
@@ -134,11 +140,14 @@ const TextExtractionPanel = () => {
       if (data.success) {
         // 如果是缓存结果，直接显示
         if (data.cached) {
-          setCurrentTask(data.data);
+          setStepTasks((prev) => ({
+            ...prev,
+            [stepIndex]: data.data,
+          }));
           setChatHistory([
             {
               role: 'system',
-              content: `使用缓存的提取结果（${currentStep.name}）`,
+              content: `使用缓存的提取结果（${step.name}）`,
             },
           ]);
           // 解析并显示缓存结果
@@ -151,7 +160,7 @@ const TextExtractionPanel = () => {
             if (parsedData) {
               setExtractionResults((prev) => ({
                 ...prev,
-                [currentStepIndex]: parsedData,
+                [stepIndex]: parsedData,
               }));
             }
           } catch (e) {
@@ -162,16 +171,19 @@ const TextExtractionPanel = () => {
         }
 
         // 新任务，开始轮询
-        setCurrentTask(data.data);
+        setStepTasks((prev) => ({
+          ...prev,
+          [stepIndex]: data.data,
+        }));
         setChatHistory([
           {
             role: 'system',
-            content: `正在使用 ${currentStep.name} 进行提取...`,
+            content: `正在使用 ${step.name} 进行提取...`,
           },
         ]);
 
         // 开始轮询任务状态
-        pollTaskStatus(data.data.id);
+        pollTaskStatus(data.data.id, stepIndex);
       } else {
         setChatHistory((prev) => [
           ...prev,
@@ -189,7 +201,7 @@ const TextExtractionPanel = () => {
   };
 
   // 轮询任务状态
-  const pollTaskStatus = async (taskId) => {
+  const pollTaskStatus = async (taskId, stepIndex) => {
     const maxAttempts = 60;
     let attempts = 0;
 
@@ -236,7 +248,7 @@ const TextExtractionPanel = () => {
               if (parsedData) {
                 setExtractionResults((prev) => ({
                   ...prev,
-                  [currentStepIndex]: parsedData,
+                  [stepIndex]: parsedData,
                 }));
               }
             } catch (e) {
@@ -329,7 +341,11 @@ const TextExtractionPanel = () => {
         // 更新到 Context
         updateExtractionContext(parsedData);
 
-        setCurrentTask(null);
+        setStepTasks((prev) => {
+          const next = { ...prev };
+          delete next[currentStepIndex];
+          return next;
+        });
         // 自动进入下一步
         if (currentStepIndex < EXTRACTION_STEPS.length - 1) {
           setCurrentStepIndex(currentStepIndex + 1);
@@ -503,7 +519,7 @@ const TextExtractionPanel = () => {
         )}
 
         {/* 提取结果预览 */}
-        {extractionResults[currentStepIndex] && (
+        {currentStepResult && (
           <Card sx={{ mb: 2 }}>
             <CardContent>
               <Box
@@ -552,7 +568,7 @@ const TextExtractionPanel = () => {
                     size="small"
                     variant="outlined"
                     onClick={() => {
-                      setEditingData(extractionResults[currentStepIndex]);
+                      setEditingData(currentStepResult);
                       setEditDialog(true);
                     }}
                   >
@@ -565,7 +581,7 @@ const TextExtractionPanel = () => {
                 sx={{ p: 2, maxHeight: 300, overflow: 'auto', bgcolor: 'grey.50' }}
               >
                 <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap' }}>
-                  {JSON.stringify(extractionResults[currentStepIndex], null, 2)}
+                  {JSON.stringify(currentStepResult, null, 2)}
                 </pre>
               </Paper>
             </CardContent>
@@ -655,7 +671,7 @@ const TextExtractionPanel = () => {
         )}
 
         {/* 自定义提取 */}
-        {!currentTask && !extractionResults[currentStepIndex] && (
+        {shouldShowCustomExtraction && (
           <Card>
             <CardContent>
               <Typography variant="subtitle2" gutterBottom>
@@ -666,7 +682,12 @@ const TextExtractionPanel = () => {
                 <Select
                   value={selectedPrompt}
                   label="选择提示词模板"
-                  onChange={(e) => setSelectedPrompt(e.target.value)}
+                  onChange={(e) =>
+                    setStepPrompts((prev) => ({
+                      ...prev,
+                      [currentStepIndex]: e.target.value,
+                    }))
+                  }
                 >
                   <MenuItem value="">使用默认</MenuItem>
                   {prompts.map((p) => (
