@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Box,
   Card,
@@ -14,19 +14,35 @@ import {
   TableRow,
   Paper,
   Alert,
+  Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import {
   Upload as UploadIcon,
   Save as SaveIcon,
   Download as DownloadIcon,
   Image as ImageIcon,
+  Add as AddIcon,
+  Edit as EditIcon,
+  Check as CheckIcon,
 } from '@mui/icons-material';
+import { useParams } from 'react-router-dom';
 import { useChemicalExtraction } from './ChemicalExtractionContext';
 import CoordinateCanvas from './CoordinateCanvas';
 import ChartPreview from './ChartPreview';
-import { ChartSelector, MaterialSelector } from './ChartSelector';
+import { ChartSelector, MaterialSelector, CharacterizationSelector } from './ChartSelector';
+import { baseHeaders } from '../../utils/request';
+
+const API_BASE = '/api/chemical';
 
 const ImageCalibrationPanel = () => {
+  const { articleId } = useParams();
   const {
     imageExtractionData,
     updateImageExtractionData,
@@ -40,6 +56,135 @@ const ImageCalibrationPanel = () => {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(null);
   const fileInputRef = useRef(null);
+
+  // 表征数据相关状态
+  const [characterizations, setCharacterizations] = useState([]);
+  const [selectedCharId, setSelectedCharId] = useState(null);
+  const [charDataValues, setCharDataValues] = useState({}); // 存储提取的数据值 { charId: { value: '', unit: '', description: '' } }
+  const [loadingChars, setLoadingChars] = useState(false);
+  const [editingChar, setEditingChar] = useState(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [extractedValue, setExtractedValue] = useState('');
+  const [extractedUnit, setExtractedUnit] = useState('');
+
+  // 加载数据库中的表征数据
+  useEffect(() => {
+    loadCharacterizations();
+  }, [articleId]);
+
+  const loadCharacterizations = async () => {
+    if (!articleId) return;
+    
+    setLoadingChars(true);
+    try {
+      const response = await fetch(`${API_BASE}/data/${articleId}`, {
+        headers: baseHeaders(),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setCharacterizations(data.data.characterizations || []);
+      }
+    } catch (error) {
+      console.error('加载表征数据失败:', error);
+    } finally {
+      setLoadingChars(false);
+    }
+  };
+
+  // 保存提取的数据值到表征
+  const saveValueToCharacterization = async (charId, value, unit) => {
+    if (!charId || !value) return;
+
+    const char = characterizations.find(c => c.id === charId);
+    if (!char) return;
+
+    try {
+      // 解析现有 results 或创建新的
+      let results = {};
+      if (char.results) {
+        try {
+          results = typeof char.results === 'string' ? JSON.parse(char.results) : char.results;
+        } catch (e) {
+          results = {};
+        }
+      }
+
+      // 添加从图片提取的数据值
+      results.imageExtractedValue = value;
+      results.imageExtractedUnit = unit;
+      results.extractionTimestamp = new Date().toISOString();
+
+      const response = await fetch(`${API_BASE}/data/characterization/${charId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...baseHeaders(),
+        },
+        body: JSON.stringify({
+          ...char,
+          results: JSON.stringify(results),
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        // 更新本地数据
+        setCharDataValues(prev => ({
+          ...prev,
+          [charId]: { value, unit, timestamp: new Date().toISOString() }
+        }));
+        // 刷新列表
+        loadCharacterizations();
+        return true;
+      }
+    } catch (error) {
+      console.error('保存数据值失败:', error);
+    }
+    return false;
+  };
+
+  // 处理从曲线提取数据值
+  const handleExtractFromCurve = () => {
+    if (curves.length === 0 || curves[0].points.length === 0) {
+      alert('请先在图片中标定至少一个数据点');
+      return;
+    }
+
+    if (!selectedCharId) {
+      alert('请先选择要填充的表征数据');
+      return;
+    }
+
+    // 获取第一个曲线的第一个点作为示例
+    const firstCurve = curves[0];
+    const firstPoint = firstCurve.points[0];
+    
+    setExtractedValue(firstPoint.dataY.toFixed(2));
+    setExtractedUnit(axisValues.yUnit || '');
+    setEditingChar(selectedCharId);
+    setEditDialogOpen(true);
+  };
+
+  // 确认保存提取的值
+  const handleConfirmExtract = async () => {
+    if (!editingChar || !extractedValue) return;
+
+    const success = await saveValueToCharacterization(
+      editingChar,
+      extractedValue,
+      extractedUnit
+    );
+
+    if (success) {
+      setEditDialogOpen(false);
+      setEditingChar(null);
+      setExtractedValue('');
+      setExtractedUnit('');
+      alert('数据值已成功保存到表征！');
+    } else {
+      alert('保存失败，请重试');
+    }
+  };
 
   // 处理图片上传
   const handleImageUpload = (e) => {
@@ -149,6 +294,18 @@ const ImageCalibrationPanel = () => {
     link.click();
   };
 
+  // 获取已保存的表征数据值显示
+  const getCharExtractedValue = (char) => {
+    if (!char.results) return null;
+    try {
+      const results = typeof char.results === 'string' ? JSON.parse(char.results) : char.results;
+      if (results.imageExtractedValue) {
+        return `${results.imageExtractedValue} ${results.imageExtractedUnit || ''}`;
+      }
+    } catch (e) {}
+    return null;
+  };
+
   return (
     <Box sx={{ p: 2 }}>
       {saveSuccess === true && (
@@ -161,6 +318,78 @@ const ImageCalibrationPanel = () => {
           数据保存失败，请重试
         </Alert>
       )}
+
+      {/* 表征数据选择区域 */}
+      <Card sx={{ mb: 2, bgcolor: 'primary.lighter' }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom color="primary.main">
+            数据库表征数据
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            选择已保存在数据库中的表征数据，从图片中提取具体数值并填充
+          </Typography>
+
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={6}>
+              <CharacterizationSelector
+                value={selectedCharId}
+                onChange={(e) => setSelectedCharId(e.target.value)}
+                characterizations={characterizations}
+                label="选择要填充的表征数据"
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Button
+                variant="contained"
+                color="secondary"
+                startIcon={<AddIcon />}
+                onClick={handleExtractFromCurve}
+                disabled={!selectedCharId || curves.length === 0 || curves[0].points.length === 0}
+                fullWidth
+              >
+                从图片提取数据值
+              </Button>
+            </Grid>
+          </Grid>
+
+          {/* 显示已有提取值的表征 */}
+          {characterizations.length > 0 && (
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                已有提取值的表征：
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {characterizations.map((char) => {
+                  const extractedValue = getCharExtractedValue(char);
+                  if (!extractedValue) return null;
+                  return (
+                    <Paper
+                      key={char.id}
+                      sx={{
+                        px: 2,
+                        py: 1,
+                        bgcolor: 'success.lighter',
+                        border: 1,
+                        borderColor: 'success.main',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                      }}
+                    >
+                      <CheckIcon color="success" fontSize="small" />
+                      <Typography variant="body2">
+                        <strong>{char.technique}</strong>: {extractedValue}
+                      </Typography>
+                    </Paper>
+                  );
+                })}
+              </Box>
+            </Box>
+          )}
+        </CardContent>
+      </Card>
+
+      <Divider sx={{ my: 2 }} />
 
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid item xs={12} md={6}>
@@ -326,6 +555,45 @@ const ImageCalibrationPanel = () => {
           <ChartPreview />
         </Grid>
       </Grid>
+
+      {/* 提取数据值对话框 */}
+      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          提取数据值到表征
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            将从图片中提取的数据值保存到选中的表征数据中
+          </Typography>
+          
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="数据值"
+                value={extractedValue}
+                onChange={(e) => setExtractedValue(e.target.value)}
+                placeholder="例如：42.5"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="单位"
+                value={extractedUnit}
+                onChange={(e) => setExtractedUnit(e.target.value)}
+                placeholder="例如：dB, MPa, °C"
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialogOpen(false)}>取消</Button>
+          <Button onClick={handleConfirmExtract} variant="contained" color="primary">
+            保存到表征
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

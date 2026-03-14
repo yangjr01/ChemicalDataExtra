@@ -74,4 +74,43 @@ export const MaterialSelector = ({ value, onChange, label = '选择材料' }) =>
   );
 };
 
-export default { ChartSelector, MaterialSelector };
+/**
+ * 表征选择器组件
+ * 从数据库中已有的表征数据中选择
+ */
+export const CharacterizationSelector = ({ 
+  value, 
+  onChange, 
+  label = '选择表征数据',
+  characterizations = []
+}) => {
+  if (characterizations.length === 0) {
+    return (
+      <TextField
+        fullWidth
+        size="small"
+        disabled
+        value="暂无表征数据，请先在数据查看页面保存表征数据"
+        InputProps={{
+          readOnly: true,
+        }}
+      />
+    );
+  }
+
+  return (
+    <FormControl fullWidth size="small">
+      <InputLabel>{label}</InputLabel>
+      <Select value={value || ''} label={label} onChange={onChange}>
+        {characterizations.map((char, index) => (
+          <MenuItem key={char.id || index} value={char.id || index}>
+            {char.technique || `表征 ${index + 1}`}
+            {char.material?.name ? ` (${char.material.name})` : ''}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  );
+};
+
+export default { ChartSelector, MaterialSelector, CharacterizationSelector };
