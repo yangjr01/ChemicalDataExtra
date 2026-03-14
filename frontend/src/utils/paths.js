@@ -234,5 +234,6 @@ export default {
     literature: () => `/chemical/literature`,
     extraction: (articleId) => `/chemical/extraction/${articleId}`,
     data: (articleId) => `/chemical/data/${articleId}`,
+    allData: () => `/chemical/alldata`,
   },
 };

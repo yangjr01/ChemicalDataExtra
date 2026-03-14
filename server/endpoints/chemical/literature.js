@@ -2,7 +2,9 @@ const { Router } = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const iconv = require("iconv-lite");
 const { Article, Author } = require("../../models/chemical");
+const { ExtractionTask } = require("../../models/chemical/extraction");
 const { validatedRequest } = require("../../utils/middleware/validatedRequest");
 const pdfParse = require("pdf-parse");
 
@@ -22,25 +24,38 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + "-" + file.originalname);
+    // 使用 iconv-lite 正确解码中文文件名
+    const decodedName = iconv.decode(Buffer.from(file.originalname, 'binary'), 'utf-8');
+    cb(null, uniqueSuffix + "-" + decodedName);
   },
 });
 
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    const allowedTypes = [".pdf", ".doc", ".docx"];
+    const allowedTypes = [".pdf", ".doc", ".docx", ".txt"];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowedTypes.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error("不支持的文件类型，仅支持 PDF、DOC、DOCX"));
+      cb(new Error("不支持的文件类型，仅支持 PDF、DOC、DOCX、TXT"));
     }
   },
   limits: {
     fileSize: 50 * 1024 * 1024, // 50MB
   },
 });
+
+// 处理中文文件名编码问题
+const decodeFilename = (filename) => {
+  try {
+    // 使用 iconv-lite 正确解码 UTF-8 文件名
+    return iconv.decode(Buffer.from(filename, 'binary'), 'utf-8');
+  } catch (e) {
+    // 如果失败，返回原始文件名
+    return filename;
+  }
+};
 
 /**
  * @route POST /api/chemical/literature/upload
@@ -352,6 +367,159 @@ router.get("/:id/pdf", async (req, res) => {
   } catch (error) {
     console.error("获取 PDF 文件失败:", error);
     res.status(500).json({ error: error.message || "获取失败" });
+  }
+});
+
+/**
+ * 处理预提取文件的映射配置
+ * 支持文件名格式：
+ * - 1预提取-材料工艺信息xxx.txt (xxx可以是任意字符)
+ * - 2材料表xxx.txt
+ * - 3工艺表xxx.txt
+ * - 4预提取-表征信息xxx.txt
+ * - 5表征信息表xxx.txt
+ */
+const PRE_EXTRACTED_FILE_MAP = {
+  "1预提取-材料工艺信息": {
+    promptId: "pre_extraction_materials_processes",
+    promptName: "pre_extraction_materials_processes",
+  },
+  "2材料表": {
+    promptId: "materials_table",
+    promptName: "materials_table",
+  },
+  "3工艺表": {
+    promptId: "processes_table",
+    promptName: "processes_table",
+  },
+  "4预提取-表征信息": {
+    promptId: "pre_extraction_characterizations",
+    promptName: "pre_extraction_characterizations",
+  },
+  "5表征信息表": {
+    promptId: "characterizations_table",
+    promptName: "characterizations_table",
+  },
+};
+
+/**
+ * @route POST /api/chemical/literature/upload-processed
+ * @desc 上传预处理过的文献数据（包含5个提示词处理过的结果）
+ */
+router.post("/upload-processed", upload.array("files", 10), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: "未上传文件" });
+    }
+
+    const { title, doi, journal, abstract } = req.body;
+    
+    // 1. 查找 PDF 文件
+    const pdfFile = req.files.find(f => 
+      f.originalname.toLowerCase().endsWith('.pdf')
+    );
+    
+    if (!pdfFile) {
+      return res.status(400).json({ error: "未找到 PDF 文件，请上传 PDF 文件" });
+    }
+
+    // 2. 创建文献记录
+    const article = await Article.create({
+      title: title || pdfFile.originalname.replace('.pdf', ''),
+      doi: doi || null,
+      journal: journal || null,
+      abstract: abstract || null,
+      sourceFile: pdfFile.path,
+      status: "completed",
+    });
+
+    console.log(`[上传预处理数据] 创建文献 ID: ${article.id}`);
+    console.log(`[上传预处理数据] 上传文件列表:`, req.files.map(f => ({ name: f.originalname, path: f.path })));
+
+    // 3. 处理预提取的 txt 文件
+    const createdTasks = [];
+    const txtFiles = req.files.filter(f => 
+      decodeFilename(f.originalname).toLowerCase().endsWith('.txt')
+    );
+    
+    console.log(`[上传预处理数据] 找到 ${txtFiles.length} 个 txt 文件`);
+
+    for (const txtFile of txtFiles) {
+      // 从文件名识别类型
+      const originalName = decodeFilename(txtFile.originalname);
+      const fileName = path.basename(originalName, '.txt');
+      let matchedConfig = null;
+      
+      console.log(`[上传预处理数据] 处理文件: ${originalName}`);
+      console.log(`[上传预处理数据] 提取名称: ${fileName}`);
+      
+      // 使用正则表达式匹配文件名
+      // 支持的格式：1预提取-材料工艺信息xxx.txt、2材料表xxx.txt 等
+      for (const [prefix, config] of Object.entries(PRE_EXTRACTED_FILE_MAP)) {
+        // 构建正则：以prefix开头，后面可以是任意字符
+        const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+        
+        if (pattern.test(fileName)) {
+          matchedConfig = config;
+          console.log(`[上传预处理数据] ✅ 匹配成功: ${prefix} -> ${config.promptName}`);
+          break;
+        }
+      }
+
+      if (!matchedConfig) {
+        console.log(`[上传预处理数据] ❌ 未识别的文件: ${originalName}`);
+        console.log(`[上传预处理数据] 期望的前缀: ${Object.keys(PRE_EXTRACTED_FILE_MAP).join(', ')}`);
+        continue;
+      }
+
+      // 读取文件内容
+      const content = fs.readFileSync(txtFile.path, 'utf-8');
+      
+      if (!content || content.trim().length === 0) {
+        console.log(`[上传预处理数据] 文件内容为空: ${txtFile.originalname}，跳过`);
+        continue;
+      }
+
+      try {
+        // 创建提取任务记录
+        const task = await ExtractionTask.create({
+          articleId: article.id,
+          promptId: matchedConfig.promptId,
+          promptName: matchedConfig.promptName,
+          status: "completed",
+          rawResponse: content,
+          parsedData: content, // 直接存储原始内容作为解析数据
+          inputTokens: 0,
+          outputTokens: content.length,
+          startedAt: new Date(),
+          completedAt: new Date(),
+        });
+
+        createdTasks.push({
+          taskId: task.id,
+          promptName: matchedConfig.promptName,
+          fileName: txtFile.originalname,
+        });
+
+        console.log(`[上传预处理数据] 创建提取任务: ${matchedConfig.promptName}`);
+      } catch (error) {
+        console.error(`[上传预处理数据] 创建任务失败: ${txtFile.originalname}`, error);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        article,
+        createdTasks,
+        totalFiles: req.files.length,
+        processedFiles: createdTasks.length,
+      },
+      message: `文献上传成功，共处理 ${createdTasks.length} 个预提取文件`,
+    });
+  } catch (error) {
+    console.error("上传预处理数据失败:", error);
+    res.status(500).json({ error: error.message || "上传失败" });
   }
 });
 

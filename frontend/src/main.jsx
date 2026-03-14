@@ -381,6 +381,13 @@ const router = createBrowserRouter([
         },
       },
       {
+        path: "/chemical/alldata",
+        lazy: async () => {
+          const { default: AllDataViewer } = await import("@/pages/Chemical/AllDataViewer");
+          return { element: <PrivateRoute Component={AllDataViewer} /> };
+        },
+      },
+      {
         path: "/chemical/extraction/:articleId",
         lazy: async () => {
           const { ExtractionFlow } = await import("@/pages/Chemical");

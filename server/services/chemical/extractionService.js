@@ -638,6 +638,154 @@ ${rawResponse.substring(0, 2000)}
 
     console.log('[saveToDatabase] 数据保存完成');
   },
+
+  /**
+   * 使用 LLM 将预提取文本转换为结构化数据
+   * @param {string} preExtractionText - 预提取的自由文本
+   * @param {string} dataType - 数据类型：materials, processes, characterizations
+   * @returns {Promise<Array>}
+   */
+  async transformPreExtractionToStructured(preExtractionText, dataType) {
+    console.log(`[transformPreExtractionToStructured] 转换 ${dataType} 数据`);
+    
+    let systemPrompt = "";
+    let userPrompt = "";
+    
+    if (dataType === "materials") {
+      systemPrompt = `你是一个专业的材料科学数据整理助手。请将给定的材料信息文本转换为标准的 JSON 格式材料表。
+
+要求：
+1. 识别文本中提到的所有材料
+2. 每个材料必须包含以下字段：
+   - name: 材料名称（必须）
+   - formula: 化学式（如果有）
+   - composition: 组成成分（JSON对象）
+   - properties: 材料属性（JSON对象，包括晶体结构、粒径、比表面积等）
+   - type: 材料类型（如：原料、产物、催化剂等）
+   - role: 在研究中的作用
+   - preparationMethod: 制备方法（如果有）
+
+3. 如果某些信息未提及，使用 null 或空对象
+4. 直接返回 JSON 数组，不要包含 markdown 代码块标记`;
+
+      userPrompt = `请将以下材料信息转换为标准 JSON 格式：
+
+${preExtractionText}
+
+请直接返回 JSON 数组格式：[{材料1}, {材料2}, ...]`;
+
+    } else if (dataType === "processes") {
+      systemPrompt = `你是一个专业的材料科学数据整理助手。请将给定的工艺流程信息文本转换为标准的 JSON 格式工艺表。
+
+要求：
+1. 识别文本中描述的所有工艺步骤
+2. 每个工艺步骤必须包含以下字段：
+   - name: 工艺名称（必须）
+   - description: 工艺描述（必须）
+   - sequence: 步骤序号（整数）
+   - conditions: 工艺条件（JSON对象，包括温度、压力、气氛、时间等）
+   - parameters: 工艺参数（JSON数组，包括参数名称、数值、单位）
+   - inputMaterials: 输入材料列表（字符串数组）
+   - outputMaterials: 输出材料列表（字符串数组）
+
+3. 如果某些信息未提及，使用 null 或空数组
+4. 直接返回 JSON 数组，不要包含 markdown 代码块标记`;
+
+      userPrompt = `请将以下工艺流程信息转换为标准 JSON 格式：
+
+${preExtractionText}
+
+请直接返回 JSON 数组格式：[{工艺1}, {工艺2}, ...]`;
+
+    } else if (dataType === "characterizations") {
+      systemPrompt = `你是一个专业的材料科学数据整理助手。请将给定的表征信息文本转换为标准的 JSON 格式表征表。
+
+要求：
+1. 识别文本中描述的所有表征测试
+2. 每个表征必须包含以下字段：
+   - technique: 表征技术名称（必须，如：XRD, SEM, TEM, BET 等）
+   - conditions: 测试条件（JSON对象，包括温度、气氛、扫描范围等）
+   - results: 测试结果（JSON对象，包括峰值、形貌描述、比表面积等）
+   - purpose: 表征目的
+   - relatedMaterial: 测试的材料
+
+3. 如果某些信息未提及，使用 null 或空对象
+4. 直接返回 JSON 数组，不要包含 markdown 代码块标记`;
+
+      userPrompt = `请将以下表征信息转换为标准 JSON 格式：
+
+${preExtractionText}
+
+请直接返回 JSON 数组格式：[{表征1}, {表征2}, ...]`;
+    }
+
+    // 调用 LLM
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ];
+
+    const provider = process.env.LLM_PROVIDER;
+    let client;
+
+    if (provider === "deepseek") {
+      const { DeepSeekLLM } = require("../../utils/AiProviders/deepseek/index");
+      client = new DeepSeekLLM();
+    } else if (provider === "generic-openai") {
+      const { GenericOpenAiLLM } = require("../../utils/AiProviders/genericOpenAi/index");
+      client = new GenericOpenAiLLM();
+    } else {
+      const { OpenAiLLM } = require("../../utils/AiProviders/openAi/index");
+      client = new OpenAiLLM();
+    }
+
+    const result = await client.getChatCompletion(messages, {
+      temperature: 0.1,
+      maxTokens: 8000,
+    });
+
+    if (!result || !result.textResponse) {
+      throw new Error("LLM 返回为空");
+    }
+
+    // 解析 LLM 返回的 JSON
+    let parsedData;
+    try {
+      // 尝试直接解析
+      parsedData = JSON.parse(result.textResponse);
+    } catch (e) {
+      // 尝试提取 JSON 代码块
+      const jsonMatch = result.textResponse.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        parsedData = JSON.parse(jsonMatch[1].trim());
+      } else {
+        // 尝试提取 JSON 数组
+        const jsonArrayMatch = result.textResponse.match(/\[[\s\S]*\]/);
+        if (jsonArrayMatch) {
+          parsedData = JSON.parse(jsonArrayMatch[0]);
+        } else {
+          throw new Error("无法解析 LLM 返回的数据");
+        }
+      }
+    }
+
+    // 确保返回的是数组
+    if (!Array.isArray(parsedData)) {
+      // 如果返回的是对象，尝试提取数组字段
+      if (parsedData.materials && Array.isArray(parsedData.materials)) {
+        parsedData = parsedData.materials;
+      } else if (parsedData.processes && Array.isArray(parsedData.processes)) {
+        parsedData = parsedData.processes;
+      } else if (parsedData.characterizations && Array.isArray(parsedData.characterizations)) {
+        parsedData = parsedData.characterizations;
+      } else {
+        throw new Error("LLM 返回的数据格式不正确");
+      }
+    }
+
+    console.log(`[transformPreExtractionToStructured] 成功转换 ${parsedData.length} 条 ${dataType} 数据`);
+    return parsedData;
+  },
 };
 
 module.exports = {

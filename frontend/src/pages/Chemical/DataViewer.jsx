@@ -37,6 +37,7 @@ import {
   Download as DownloadIcon,
   ExpandMore as ExpandMoreIcon,
   AutoFixHigh as AutoFixIcon,
+  Storage as StorageIcon,
 } from '@mui/icons-material';
 import { useParams } from 'react-router-dom';
 import { baseHeaders } from '../../utils/request';
@@ -60,6 +61,38 @@ const DataViewer = () => {
   const [showPreExtractions, setShowPreExtractions] = useState(false);
   const [materialsPreExtraction, setMaterialsPreExtraction] = useState(null);
   const [characterizationsPreExtraction, setCharacterizationsPreExtraction] = useState(null);
+  const [savingToDB, setSavingToDB] = useState(false);
+
+  // 保存所有预提取数据到数据库（统一入口）
+  const saveAllPreExtractionsToDB = async () => {
+    if (!window.confirm('确定要将所有预提取的材料和工艺数据保存到数据库吗？\n\n这将调用 AI 整理并保存数据。')) return;
+
+    setSavingToDB(true);
+    try {
+      const response = await fetch(`${API_BASE}/data/${articleId}/save-all-pre-extractions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...baseHeaders(),
+        },
+        body: JSON.stringify({}),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert(`保存成功！\n\n材料：${data.data.materialsCount} 条\n工艺：${data.data.processesCount} 条\n表征：${data.data.characterizationsCount} 条`);
+        // 刷新数据
+        fetchData();
+      } else {
+        alert(data.error || '保存失败');
+      }
+    } catch (error) {
+      console.error('保存失败:', error);
+      alert('保存失败：' + error.message);
+    } finally {
+      setSavingToDB(false);
+    }
+  };
 
   // 获取数据
   const fetchData = async () => {
@@ -208,12 +241,24 @@ const DataViewer = () => {
                 <AutoFixIcon color="primary" />
                 <Typography variant="h6">预提取结果（5 个模块）</Typography>
               </Box>
-              <Button
-                size="small"
-                onClick={() => setShowPreExtractions(!showPreExtractions)}
-              >
-                {showPreExtractions ? '收起' : '展开'}
-              </Button>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                {/* 统一的保存到数据库按钮 */}
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<StorageIcon />}
+                  onClick={saveAllPreExtractionsToDB}
+                  disabled={savingToDB || !preExtractions.some(m => m.result)}
+                >
+                  {savingToDB ? '保存中...' : '保存到数据库'}
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => setShowPreExtractions(!showPreExtractions)}
+                >
+                  {showPreExtractions ? '收起' : '展开'}
+                </Button>
+              </Box>
             </Box>
 
             {showPreExtractions && (
@@ -234,26 +279,28 @@ const DataViewer = () => {
                       </AccordionSummary>
                       <AccordionDetails>
                         {module.result ? (
-                          <Box
-                            sx={{
-                              p: 2,
-                              bgcolor: 'grey.50',
-                              borderRadius: 1,
-                              maxHeight: 400,
-                              overflow: 'auto',
-                            }}
-                          >
-                            <pre
-                              style={{
-                                whiteSpace: 'pre-wrap',
-                                wordWrap: 'break-word',
-                                margin: 0,
-                                fontFamily: 'monospace',
-                                fontSize: '0.875rem',
+                          <Box>
+                            <Box
+                              sx={{
+                                p: 2,
+                                bgcolor: 'grey.50',
+                                borderRadius: 1,
+                                maxHeight: 400,
+                                overflow: 'auto',
                               }}
                             >
-                              {module.result}
-                            </pre>
+                              <pre
+                                style={{
+                                  whiteSpace: 'pre-wrap',
+                                  wordWrap: 'break-word',
+                                  margin: 0,
+                                  fontFamily: 'monospace',
+                                  fontSize: '0.875rem',
+                                }}
+                              >
+                                {module.result}
+                              </pre>
+                            </Box>
                           </Box>
                         ) : (
                           <Alert severity="info">
